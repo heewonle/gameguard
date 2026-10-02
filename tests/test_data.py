@@ -51,7 +51,7 @@ def test_public_tables_have_no_label_columns(world):
     out, _ = world
     for f in glob.glob(str(out / "*.parquet")):
         cols = set(pd.read_parquet(f).columns)
-        assert not cols & {"label", "kind", "role", "ring_id", "is_macro", "base_price"}, f
+        assert not cols & {"label", "kind", "role", "ring_id", "is_macro", "base_price", "stealth"}, f
 
 
 def test_reproducible(tmp_path):

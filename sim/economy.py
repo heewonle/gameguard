@@ -61,6 +61,7 @@ def build_economy(acc, sess, actions, maps, items, cfg, rng, start):
     kind = acc["kind"].to_numpy()
     role = acc["role"].to_numpy()
     grp = acc["ring_id"].to_numpy()
+    stealth_of = pd.Series(acc["stealth"].to_numpy(), index=aid)
     days = cfg["days"]
     base_price = items.set_index("item_id")["base_price"]
     grade = items.set_index("item_id")["grade"]
@@ -148,11 +149,12 @@ def build_economy(acc, sess, actions, maps, items, cfg, rng, start):
         selr = aid[(grp == rid) & (role == "seller")]
         buyers = aid[(grp == rid) & (role == "buyer")]
         bs = sess[(sess["kind"] == "farm_bot") & np.isin(sess["account_id"], aid[grp == rid])]
-        # 봇 → 수거: 세션 끝 무렵 드랍의 85~95%
+        # 봇 → 수거: 세션 끝 무렵 드랍의 85~95% (은닉형: 50~68%, 잡템 없이 골드만)
         to = rng.choice(coll, len(bs))
-        amt = bs["drop"].to_numpy() * rng.uniform(0.85, 0.95, len(bs))
+        bst = stealth_of.loc[bs["account_id"]].to_numpy()
+        amt = bs["drop"].to_numpy() * np.where(bst, rng.uniform(0.5, 0.68, len(bs)), rng.uniform(0.85, 0.95, len(bs)))
         tsb = bs["logout_at"].to_numpy() - np.timedelta64(30, "s")
-        it = np.where(rng.random(len(bs)) < 0.5, rng.choice(junk, len(bs)), 0)
+        it = np.where((rng.random(len(bs)) < 0.5) & ~bst, rng.choice(junk, len(bs)), 0)
         L.trade(tsb, to, bs["account_id"].to_numpy(), it, (it > 0).astype(int), amt, "p2p")
         # 수거 → 판매: 매일 23시대, 받은 금액의 90%
         daily = pd.DataFrame({"c": to, "d": bs["day"].to_numpy(), "amt": amt}).groupby(["c", "d"], as_index=False)["amt"].sum()
@@ -169,9 +171,19 @@ def build_economy(acc, sess, actions, maps, items, cfg, rng, start):
                 rows.append(cand.sample(min(n, len(cand)), random_state=int(rng.integers(1 << 30))))
         if rows:
             bt = pd.concat(rows)
-            it = rng.choice(junk, len(bt))
-            L.trade(_rand_ts_in(bt, rng), bt["account_id"].to_numpy(), rng.choice(selr, len(bt)), it, 1,
-                    rng.uniform(200_000, 3_000_000, len(bt)), "p2p")
+            amount = rng.uniform(200_000, 3_000_000, len(bt))
+            bst = stealth_of.loc[bt["account_id"]].to_numpy()
+            # 일반: 잡템 1개에 큰 골드 (단가 이상치)
+            b1 = bt[~bst]
+            L.trade(_rand_ts_in(b1, rng), b1["account_id"].to_numpy(), rng.choice(selr, len(b1)),
+                    rng.choice(junk, len(b1)), 1, amount[~bst], "p2p")
+            # 은닉형: 아이템 없이 3~8회로 쪼개 같은 세션 안에 나눠 지급
+            b2 = bt[bst]
+            parts = rng.integers(3, 9, len(b2))
+            b2r = b2.loc[b2.index.repeat(parts)] if len(b2) else b2
+            share = np.repeat(amount[bst] / parts, parts) * rng.uniform(0.8, 1.2, parts.sum())
+            L.trade(_rand_ts_in(b2r, rng), b2r["account_id"].to_numpy(),
+                    np.repeat(rng.choice(selr, len(b2)), parts), 0, 0, share, "p2p")
 
     # ── 다계정: 부계정 → 본계정 송금 ──
     for gid_ in np.unique(grp[kind == "multi_account"]):
@@ -185,25 +197,30 @@ def build_economy(acc, sess, actions, maps, items, cfg, rng, start):
     g3 = items.loc[items["grade"] == 3, "item_id"].to_numpy()
     for gid_ in np.unique(grp[kind == "market_manip"]):
         mem = aid[grp == gid_]
+        sneaky = bool(stealth_of.loc[mem[0]])
         target = int(rng.choice(g3))
         bp = base_price.loc[target]
-        d0 = int(rng.integers(3, max(4, days - 6)))
+        d0 = int(rng.integers(3, max(4, days - 9)))
         n = int(rng.integers(30, 61))
-        ts = (start + pd.Timedelta(days=d0) + pd.to_timedelta(rng.uniform(0, 48, n), unit="h")).floor("s").to_numpy()
+        # 은닉형은 6일에 걸쳐 천천히 매집 (48시간 15개 기준 아래)
+        span_h = 144 if sneaky else 48
+        ts = (start + pd.Timedelta(days=d0) + pd.to_timedelta(rng.uniform(0, span_h, n), unit="h")).floor("s").to_numpy()
         sel = rng.choice(sellers_pool, n)
         price = bp * rng.lognormal(0, 0.1, n)
         tid = L.trade(ts, sel, rng.choice(mem, n), np.full(n, target), 1, price, "market")
         L.listing(ts - np.timedelta64(3600, "s"), sel, np.full(n, target), price, "sold", tid)
         mult = rng.uniform(2.5, 4.0)
         k = int(rng.integers(10, 21))
-        ts2 = (start + pd.Timedelta(days=d0 + 2) + pd.to_timedelta(rng.uniform(0, 72, k), unit="h")).floor("s").to_numpy()
+        ts2 = (start + pd.Timedelta(hours=d0 * 24 + span_h) + pd.to_timedelta(rng.uniform(0, 72, k), unit="h")).floor("s").to_numpy()
         s2 = rng.choice(mem, k)
         p2 = bp * mult * rng.lognormal(0, 0.05, k)
         buyers2 = rng.choice(acc.loc[kind == "normal", "account_id"].to_numpy(), k)
         tid2 = L.trade(ts2, s2, buyers2, np.full(k, target), 1, p2, "market")
         L.listing(ts2 - np.timedelta64(7200, "s"), s2, np.full(k, target), p2, "sold", tid2)
         L.listing(ts2, rng.choice(mem, k), np.full(k, target), bp * mult * rng.lognormal(0, 0.05, k), "active")
-        # 자전거래: 같은 쌍이 같은 아이템을 반복 왕복
+        # 자전거래: 같은 쌍이 같은 아이템을 반복 왕복 (은닉형은 하지 않음)
+        if sneaky:
+            continue
         a_, b_ = mem[0], mem[1]
         w = int(rng.integers(5, 16))
         tsw = np.sort((start + pd.Timedelta(days=d0 + 1) + pd.to_timedelta(rng.uniform(0, 96, w), unit="h")).floor("s").to_numpy())
@@ -248,7 +265,13 @@ def build_economy(acc, sess, actions, maps, items, cfg, rng, start):
         krw = rng.choice([55_000, 110_000, 330_000], len(rows)).astype("int64")
         ts = pay(rows, krw, rng.uniform(24, 14 * 24, len(rows)))
         tts = (ts + pd.to_timedelta(rng.uniform(1, 12, len(rows)), unit="h").to_numpy()).astype("datetime64[s]")
-        L.trade(tts, np.full(len(rows), recv), rows["account_id"].to_numpy(), 0, 0,
-                krw * gpk_krw * rng.uniform(0.85, 0.95, len(rows)), "p2p")
+        gold = krw * gpk_krw * rng.uniform(0.85, 0.95, len(rows))
+        if stealth_of.loc[recv]:
+            # 은닉형: 수령자가 거래소에 잡템을 올리고 결제자가 그 매물을 사는 방식으로 이전
+            it = rng.choice(junk, len(rows))
+            tid = L.trade(tts, np.full(len(rows), recv), rows["account_id"].to_numpy(), it, 1, gold, "market")
+            L.listing(tts - np.timedelta64(600, "s"), np.full(len(rows), recv), it, gold, "sold", tid)
+        else:
+            L.trade(tts, np.full(len(rows), recv), rows["account_id"].to_numpy(), 0, 0, gold, "p2p")
 
     return L

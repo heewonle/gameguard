@@ -32,8 +32,8 @@ def make_accounts(cfg: dict, rng: np.random.Generator, start: pd.Timestamp) -> p
     normal = _block(n, "normal", np.where(hard, "hardcore", "player"), ring_id="",
                     p_active=np.where(hard, 0.92, rng.beta(2, 3, n)),
                     n_sess=np.where(hard, 2.0, 0.35),
-                    dur_med_m=np.where(hard, 240.0, rng.uniform(30, 70, n)),
-                    dur_sd=0.6, int_mean=nc["action_interval_s"] * rng.uniform(0.8, 1.25, n),
+                    dur_med_m=np.where(hard, 170.0, rng.uniform(30, 70, n)),
+                    dur_sd=np.where(hard, 0.35, 0.6), int_mean=nc["action_interval_s"] * rng.uniform(0.8, 1.25, n),
                     int_cv=rng.uniform(0.9, 1.6, n), single_map=False, n_skills=8)
     # 길드: guild_size 명씩, 첫 번째가 길드장
     gid = rng.permutation(n) // nc["guild_size"]
@@ -103,6 +103,25 @@ def make_accounts(cfg: dict, rng: np.random.Generator, start: pd.Timestamp) -> p
     acc["guild_id"] = acc["guild_id"].astype(int)
     acc["macro_hour"] = acc["macro_hour"].astype(int)
 
+    # ── 은닉형(stealth): 룰을 피하도록 사람처럼 행동하는 어뷰저 ──
+    # 봇·매크로·RMT 구매자는 계정 단위, 다계정·시세조작·차지백은 그룹 단위로 정한다.
+    sf = ab.get("stealth_frac", 0.0)
+    kinds_ = acc["kind"].to_numpy()
+    stealth = (kinds_ != "normal") & (rng.random(N) < sf)
+    for k in ("multi_account", "market_manip", "chargeback"):
+        for gid_ in acc.loc[kinds_ == k, "ring_id"].unique():
+            m = (acc["ring_id"] == gid_).to_numpy()
+            stealth[m] = rng.random() < sf
+    acc["stealth"] = stealth
+    sb = stealth & (kinds_ == "farm_bot")                      # 사람 같은 리듬, 짧은 가동
+    acc.loc[sb, "int_cv"] = rng.uniform(0.5, 0.9, sb.sum())
+    acc.loc[sb, "dur_med_m"] = rng.uniform(600, 900, sb.sum())
+    acc.loc[sb, "dur_sd"] = 0.15
+    acc.loc[sb, "n_skills"] = 5
+    acc["macro_cv"] = 0.02
+    sm = stealth & (kinds_ == "macro")                         # 지터를 넣은 매크로
+    acc.loc[sm, "macro_cv"] = rng.uniform(0.25, 0.45, sm.sum())
+
     # 비정상 유저 일부도 길드에 넣어 길드 정보로 바로 구분되지 않게
     nguild = int(acc["guild_id"].max())
     no_g = acc["guild_id"] == 0
@@ -144,10 +163,12 @@ def make_accounts(cfg: dict, rng: np.random.Generator, start: pd.Timestamp) -> p
         ipool = rng.integers(10**8, 10**9, int(rng.integers(2, 4)))
         dev[idx] = rng.choice(dpool, len(idx))
         ip[idx] = rng.choice(ipool, len(idx))
-    # 다계정: 한 기기·IP
+    # 다계정: 한 기기·IP. 은닉형은 기기를 계정마다 바꾸고(기기 정보 변조) IP만 공유
+    st = acc["stealth"].to_numpy()
     for gid_ in np.unique(groups[kinds == "multi_account"]):
         idx = np.flatnonzero(groups == gid_)
-        dev[idx] = dev[idx[0]]
+        if not st[idx[0]]:
+            dev[idx] = dev[idx[0]]
         ip[idx] = ip[idx[0]]
     acc["device_id"] = [f"D{d:09d}" for d in dev]
     acc["ip_hash"] = [f"{(i * 2654435761) % 16**10:010x}" for i in ip]

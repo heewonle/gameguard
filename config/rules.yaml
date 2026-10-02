@@ -1,0 +1,32 @@
+# SQL 룰 임계값. 근거는 각 sql/rules/*.sql 머리 주석 참고.
+# 값을 바꾸면 eval 리포트로 정밀도·재현율 변화를 확인한다.
+R01_long_session:
+  long_hours: 18        # 정상 하드코어 유저는 하루 8~14시간 → 18시간 이상은 사람이 버티기 어려움
+  min_days: 5
+R02_regular_rhythm:
+  max_cv: 0.3           # 사람 행동 간격 변동계수는 ~1.0 이상
+  min_actions: 100      # 세션당 최소 행동 수 (짧은 세션 우연 제외)
+  min_sessions: 3
+R03_gold_funnel_out:
+  min_out_ratio: 0.7    # 번 골드(드랍+퀘스트+결제) 대비 1:1로 내보낸 비율
+  max_partners: 3
+  min_income: 300000   # 접속이 적은 유저의 소액 선물 한 번으로 비율이 튀는 것 방지
+R04_shared_device:
+  min_accounts: 4       # 가족 공유는 2~3명
+  max_accounts: 30      # 이보다 많으면 PC방 등 공용 기기로 보고 제외
+R05_price_outlier:
+  min_robust_z: 6       # 아이템별 로그 가격의 (중앙값, MAD) 기준
+  min_item_trades: 10
+R06_wash_trade:
+  min_round_trips: 3
+  window_days: 7
+R07_chargeback_seq:
+  transfer_hours: 24
+  min_transfer_ratio: 0.5
+R08_gold_sink_in:
+  min_senders: 5
+  min_in_ratio: 3.0     # 받은 1:1 골드 / 자기 드랍+퀘스트
+  min_in_gold: 1000000
+R09_market_hoarding:
+  min_units: 15         # 같은 아이템을 거래소에서 48시간 안에 15개 이상
+  window_hours: 48

@@ -18,6 +18,7 @@ abuse:
   multi_account_groups: 8
   market_manip_groups: 2
   chargeback: 15
+  stealth_frac: 0.4
 
 world:
   n_maps: 10

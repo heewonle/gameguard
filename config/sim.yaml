@@ -19,6 +19,7 @@ abuse:
   multi_account_groups: 60   # 그룹 1개 = 본계정 1 + 부계정 4~8
   market_manip_groups: 8     # 그룹 1개 = 3~5계정
   chargeback: 120
+  stealth_frac: 0.4          # 어뷰저 중 룰을 피하도록 사람처럼 행동하는 비율
 
 world:
   n_maps: 10

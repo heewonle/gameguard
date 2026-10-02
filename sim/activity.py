@@ -101,7 +101,7 @@ def make_actions(s: pd.DataFrame, acc: pd.DataFrame, cfg: dict, rng) -> pd.DataF
     kind = acc["kind"].to_numpy()[a]
     macro = s["is_macro"].to_numpy()
     imean = np.where(macro, acc["macro_period"].to_numpy()[a], acc["int_mean"].to_numpy()[a])
-    icv = np.where(macro, 0.02, acc["int_cv"].to_numpy()[a])
+    icv = np.where(macro, acc["macro_cv"].to_numpy()[a], acc["int_cv"].to_numpy()[a])
     dur = (s["logout_at"] - s["login_at"]).dt.total_seconds().to_numpy()
     n = np.maximum(1, np.floor(dur / imean)).astype(np.int64)
 

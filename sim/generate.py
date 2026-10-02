@@ -60,8 +60,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config/sim.yaml")
     ap.add_argument("--out", default="data/raw")
+    ap.add_argument("--seed", type=int, help="설정 파일의 seed 대신 사용 (평가용 월드)")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config, encoding="utf-8"))
+    if args.seed is not None:
+        cfg["seed"] = args.seed
     rng = np.random.default_rng(cfg["seed"])
     start = pd.Timestamp(cfg["start"])
     end = start + pd.Timedelta(days=cfg["days"])
@@ -107,7 +110,7 @@ def main():
     w(items[["item_id", "grade"]], "items")
     w(maps[["map_id", "min_level"]], "maps")
     # 정답
-    lab = acc[["account_id", "kind", "role", "ring_id"]].rename(columns={"kind": "label"})
+    lab = acc[["account_id", "kind", "role", "ring_id", "stealth"]].rename(columns={"kind": "label"})
     lab.to_parquet(os.path.join(args.out, "labels", "account_labels.parquet"), index=False)
     items.to_parquet(os.path.join(args.out, "labels", "item_truth.parquet"), index=False)
     macro_sess = sess_out.loc[sess["is_macro"].to_numpy(), ["session_id", "account_id"]]
