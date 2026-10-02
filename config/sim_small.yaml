@@ -1,0 +1,25 @@
+# 개발용 소규모 월드 (수십 초 안에 생성)
+seed: 7
+start: "2026-09-01"
+days: 14
+
+normal:
+  n: 2000
+  hardcore_frac: 0.03
+  family_device_frac: 0.05
+  guild_size: 25
+  payer_frac: 0.10
+  legit_refund_rate: 0.01
+  action_interval_s: 120
+
+abuse:
+  farm_rings: 2
+  macro: 20
+  multi_account_groups: 8
+  market_manip_groups: 2
+  chargeback: 15
+
+world:
+  n_maps: 10
+  n_items: 200
+  gold_per_krw: 10

@@ -1,0 +1,26 @@
+# GameGuard 합성 MMORPG 월드 설정
+# 기본값 = 포트폴리오용 전체 규모(이벤트 1,000만 행+). 개발 중에는 config/sim_small.yaml 사용.
+seed: 42
+start: "2026-09-01"
+days: 30
+
+normal:
+  n: 20000
+  hardcore_frac: 0.03        # 하루 8~14시간 접속하는 정상 유저 (작업장 봇 오탐 유도)
+  family_device_frac: 0.05   # 2~3명이 기기를 공유하는 정상 가족 (다계정 오탐 유도)
+  guild_size: 25             # 길드장은 길드원 선물을 받음 (RMT 수거 오탐 유도)
+  payer_frac: 0.10
+  legit_refund_rate: 0.01    # 정상 환불 (차지백 오탐 유도)
+  action_interval_s: 120     # 로그로 남는 의미 있는 행동(사냥·루팅·스킬 등) 평균 간격
+
+abuse:
+  farm_rings: 8              # 링 1개 = 봇 15~25 + 수거 2 + 판매 2 + RMT 구매자 20~40
+  macro: 150
+  multi_account_groups: 60   # 그룹 1개 = 본계정 1 + 부계정 4~8
+  market_manip_groups: 8     # 그룹 1개 = 3~5계정
+  chargeback: 120
+
+world:
+  n_maps: 10
+  n_items: 200
+  gold_per_krw: 10
