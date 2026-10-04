@@ -138,9 +138,41 @@ def report_stage2(db: str, out_dir: str, out_md: str, budget: int = 300) -> str:
     return text
 
 
+def report_stage3(db: str, out_dir: str, out_md: str) -> str:
+    con = connect(db, read_only=True)
+    lab = load_labels(con)
+    rules = set(pd.read_parquet(os.path.join(out_dir, "rule_hits.parquet"))["account_id"])
+    ml = pd.read_parquet(os.path.join(out_dir, "ml_scores_sanctioned.parquet"))
+    ml = set(ml.loc[ml["ml_flag"], "account_id"])
+    fi = set(pd.read_parquet(os.path.join(out_dir, "graph_fanin.parquet"))["account_id"])
+    pr = pd.read_parquet(os.path.join(out_dir, "graph_propagation.parquet"))
+    pr = set(pr.loc[pr["flag"], "account_id"])
+    steps = [("1단 룰", rules), ("+ 2단 ML-sanctioned", rules | ml), ("+ 3단 신원 그룹 송금 집중", rules | ml | fi),
+             ("+ 3단 경보 전파 (최종)", rules | ml | fi | pr)]
+    rows, st_rows = [], []
+    for name, flagged in steps:
+        s = summary(flagged, lab)
+        rows.append({"단계": name, "경보": s["flagged"], "정밀도": s["precision"], "재현율": s["recall"], "F1": s["f1"],
+                     "FP": s["fp"], "FN": s["fn"]})
+        st_rows.append(stealth_table(flagged, lab).set_index("label")["recall_stealth"].rename(name))
+    st = pd.concat(st_rows, axis=1).reset_index().rename(columns={"label": "유형 (은닉형 재현율)"})
+    final = rules | ml | fi | pr
+    md = [f"# 3단 평가 — 룰 + ML + 그래프 ({dt.date.today()})", "",
+          f"- 평가 월드: `{db}` — 계정 {len(lab):,}, 어뷰징 {int((lab['label'] != 'normal').sum()):,}",
+          "- 모든 임계값은 개발 월드(seed 42)에서 결정. ML은 룰로 확정된 계정만 양성으로 학습(sanctioned).",
+          "- 신원 그룹 송금 집중: 주 IP·기기를 공유하는 4~30명 그룹에서 3명 이상이 한 계정에 송금의 70% 이상을 몰아줌 (라벨·씨앗 불필요)",
+          "- 경보 전파: 룰 히트(확정에 가까운 경보)를 씨앗으로, 거래·신원 연결 가중치의 70% 이상이 씨앗 쪽인 계정. ML 경보는 검토 전이므로 씨앗에서 뺀다", "",
+          "## 단계별 누적 성능", "", fmt(pd.DataFrame(rows)), "",
+          "## 단계별 은닉형 재현율", "", fmt(st), "",
+          "## 최종 유형·역할별 재현율", "", fmt(coverage_table(final, lab)), ""]
+    text = "\n".join(md)
+    open(out_md, "w", encoding="utf-8").write(text)
+    return text
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=["rules", "stage2"])
+    ap.add_argument("what", choices=["rules", "stage2", "stage3"])
     ap.add_argument("--db", default="data/test.duckdb")
     ap.add_argument("--hits", default="data/out_test/rule_hits.parquet")
     ap.add_argument("--out", default="data/out_test")
@@ -148,5 +180,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.what == "rules":
         print(report_rules(a.db, a.hits, a.md or os.path.join(ROOT, "reports", "eval_rules_test.md")))
-    else:
+    elif a.what == "stage2":
         print(report_stage2(a.db, a.out, a.md or os.path.join(ROOT, "reports", "eval_stage2_test.md")))
+    else:
+        print(report_stage3(a.db, a.out, a.md or os.path.join(ROOT, "reports", "eval_stage3_test.md")))
