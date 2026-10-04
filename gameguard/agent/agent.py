@@ -39,11 +39,15 @@ MIN_TOOL_CALLS = 3
 
 
 class OllamaBackend:
+    # 한 번의 응답 길이 상한. 정상 응답은 수백~1,700 토큰인데, 가끔 같은 문장을 반복하며 1만 토큰 넘게
+    # 생성해 한 건에 4분씩 걸렸다 (개발·평가 월드 모두 관찰). 상한에 걸리면 판정 JSON 이 잘려 uncertain 처리된다.
+    MAX_TOKENS = 2048
+
     def __init__(self, model: str, num_ctx: int = 16384):
         import ollama
         self.client = ollama.Client()
         self.model = model
-        self.opts = {"num_ctx": num_ctx, "temperature": 0.1}
+        self.opts = {"num_ctx": num_ctx, "temperature": 0.1, "num_predict": self.MAX_TOKENS}
 
     def chat(self, messages, tools=None, fmt=None):
         r = self.client.chat(model=self.model, messages=messages, tools=tools, format=fmt, options=self.opts)

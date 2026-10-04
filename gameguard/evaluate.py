@@ -253,7 +253,12 @@ def report_agent(db: str, out_dir: str, tag: str, out_md: str) -> str:
           f"- 근거 수치 사실성: 근거 {g_items}개 중 숫자가 도구 결과와 일치 **{g_ok / max(g_items, 1):.1%}**", "",
           "| 실제 \\ 판정 | abuse | uncertain | normal |", "|---|---:|---:|---:|",
           *[f"| {i} | " + " | ".join(str(int(v)) for v in row) + " |" for i, row in conf.iterrows()], "",
-          "## 유형별", "", fmt(by_type), "",
+          f"- 판정 JSON 이 길이 상한(2,048 토큰)에 잘려 uncertain 처리된 건 {int(df.get('_raw', pd.Series(dtype=object)).notna().sum())}건",
+          f"- 에이전트가 normal 로 넘긴 경보 {int((df['verdict'] == 'normal').sum())}/{len(df)}건 = 검토자가 보지 않아도 되는 비율 "
+          f"{(df['verdict'] == 'normal').mean():.1%} (그중 실제 어뷰저 {int(((df['verdict'] == 'normal') & df['is_abuse']).sum())}건은 놓침)", "",
+          "## 유형별", "",
+          "어뷰징 유지 = 그 유형 실제 어뷰저 중 abuse/uncertain 판정 비율. 유형 정확 = 그 유형 실제 어뷰저 중 abuse 로 판정하고 유형까지 맞힌 비율 (uncertain 은 틀린 것으로 셈)", "",
+          fmt(by_type), "",
           "## 비용·속도 (RTX 4070 SUPER 로컬)", "",
           f"- 건당 중앙값 {df['seconds'].median():.1f}초, 도구 호출 {df['tool_calls'].median():.0f}회, "
           f"입력 토큰 {df['tokens_in'].median():,.0f} / 출력 {df['tokens_out'].median():,.0f}",

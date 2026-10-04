@@ -3,7 +3,7 @@
 > 작업 중 (2026-10). 설계: `JobApplication2026/design/P1_GameGuard_이상탐지.md`
 
 정답 라벨이 있는 **합성 MMORPG 로그**에서 작업장 봇·RMT 거래망·매크로·다계정·시세조작·차지백을 탐지한다.
-탐지는 **SQL 룰 → 계정 피처 ML → 거래 그래프** 3단으로 쌓고, 걸린 계정은 LLM 조사 에이전트가 증거를 모아 보고서를 쓴다(제재는 사람 승인).
+탐지는 **SQL 룰 → 계정 피처 ML → 거래 그래프** 3단으로 쌓고, 걸린 계정은 **로컬 LLM 조사 에이전트**가 증거를 모아 판정·근거를 쓴다(제재는 사람 승인).
 
 ## 현재 결과 (평가 월드 seed 2026 — 룰·모델·임계값은 개발 월드 seed 42에서만 정함)
 
@@ -33,6 +33,30 @@
 - 경보 전파를 개발 월드에서는 룰 히트를 씨앗으로 조정했는데, 평가 월드에서 실수로 ML 경보까지 씨앗에 넣어 실행했다(최종 F1 0.897, 오탐 213). 검토 전 ML 경보의 오탐에서 전파가 번진 것으로, 개발 조건과 같게 **룰 히트만 씨앗**으로 고정했다. 두 결과를 모두 남긴다.
 
 상세: [룰](reports/eval_rules_test.md) · [2단](reports/eval_stage2_test.md) · [3단](reports/eval_stage3_test.md)
+
+## 4단 — LLM 조사 에이전트 (로컬 LLM, API 비용 0원)
+
+경보가 뜬 계정을 LLM이 읽기 전용 도구 6개(계정 요약·접속 패턴·골드 흐름·거래 상대·신원 공유·SELECT 조회)로 조사하고, **조사 매뉴얼**(유형별 수치 확인 항목, 2개 이상 충족해야 abuse)에 따라 판정·근거·권고를 JSON으로 낸다. 제재는 항상 사람이 승인한다.
+
+- 모델: `qwen3-vl:8b-instruct` — **로컬 Ollama (RTX 4070 SUPER)**, 유료 API 없이 동작하고 데이터가 PC 밖으로 나가지 않는다. 백엔드는 `chat()` 인터페이스 하나라 Claude·OpenAI API 로 바꿔 끼울 수 있다
+- 안전장치: 정답은 별도 DB 파일, 에이전트 연결은 읽기 전용 + 외부 파일 접근 차단, 우회 쿼리 6종 테스트
+- 프롬프트는 개발 월드에서만 v1→v3 로 개선하고 고정 ([개발 기록](reports/agent_prompt_dev.md))
+
+**평가 월드 경보 150건** (경보 출처로만 층화 추출: 룰 포함 50 + 룰 밖 100, 실제 어뷰저 117 / 1~3단 오탐 33)
+
+| 지표 | 값 |
+|---|---:|
+| 1~3단 오탐 중 에이전트가 정상으로 걸러냄 | **63.6%** (21/33) |
+| 실제 어뷰저를 어뷰징/불확실로 유지 | **93.2%** (109/117) |
+| 어뷰징 판정의 유형 정확도 | **84.9%** (LLM 없는 기준선 72.6%) |
+| 근거 수치가 도구 결과와 일치 | **96.6%** (496개) |
+| 건당 시간 (중앙값) | 21.1초 · 도구 5회 · 입력 1만 / 출력 1.5천 토큰 |
+
+- 에이전트가 normal 로 넘긴 경보 29건(19.3%)은 검토자가 보지 않아도 되지만, 그중 8건은 실제 어뷰저(놓침)다 — 자동 종결이 아니라 "검토 우선순위 낮춤"으로 쓰는 것이 맞다
+- 약점: 차지백(유지 52.9%)과 매크로 유형 분류. 8B 모델이 "2배 이상" 같은 수치 비교를 가끔 틀린다
+- 첫 평가 실행은 일부 응답이 1만 토큰 넘게 반복 생성되는 문제로 중단하고(6건에서 중단, 기록 보존), 응답 길이 상한(2,048)을 넣은 뒤 처음부터 다시 실행했다. 상한에 걸린 4건은 uncertain 처리
+
+상세: [reports/eval_agent_test_v3.md](reports/eval_agent_test_v3.md)
 
 ## 데이터
 
@@ -82,6 +106,10 @@ python -m gameguard.models score --mode sanctioned --db data/test.duckdb --out d
 python -m gameguard.evaluate stage2
 python -m gameguard.graph --db data/test.duckdb --out data/out_test   # 씨앗 = 룰 히트
 python -m gameguard.evaluate stage3
+python -m gameguard.alerts --out data/out_test                       # 최종 경보 + 단계별 근거
+ollama pull qwen3-vl:8b-instruct                                     # 로컬 LLM (최초 1회)
+python -m gameguard.agent.agent --db data/test.duckdb --out data/out_test --n-rule 50 --n-other 100 --prompt v3 --tag test_v3
+python -m gameguard.evaluate agent --tag test_v3
 python -m pytest
 ```
 
@@ -91,6 +119,6 @@ python -m pytest
 - [x] SQL 룰 9개 + 개발/평가 월드 분리 평가
 - [x] 계정 피처 SQL(52개) + IsolationForest / LightGBM (oracle·sanctioned 라벨 비교)
 - [x] 거래·신원 그래프 (신원 그룹 송금 집중 + 룰 히트 기반 경보 전파)
-- [ ] LLM 조사 에이전트 + 평가
+- [x] LLM 조사 에이전트 (로컬 Ollama) + 평가
 - [ ] Streamlit 대시보드, 일일 배치
 - [ ] 방법론 문서

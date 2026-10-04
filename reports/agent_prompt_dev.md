@@ -1,7 +1,9 @@
 # 조사 에이전트 프롬프트 개발 기록 (개발 월드 seed 42 에서만)
 
 모델: `qwen3-vl:8b-instruct` (로컬 Ollama, RTX 4070 SUPER, API 비용 0원)
-평가 월드는 v3 를 고정한 뒤 한 번만 실행했다 → [eval_agent_test_v3.md](eval_agent_test_v3.md)
+평가 월드는 v3 를 고정한 뒤 실행했다 → [eval_agent_test_v3.md](eval_agent_test_v3.md)
+
+> 평가 월드 첫 실행은 6건째에서 중단했다: 일부 응답이 같은 문장을 반복하며 1만 4천 토큰까지 생성해 건당 4분이 걸렸다(개발 월드 마지막 건들도 같은 현상). 응답 길이 상한 `num_predict=2048` 만 추가하고(프롬프트·디코딩 설정은 그대로) 150건을 처음부터 다시 실행했다. 중단된 6건 기록은 `data/out_test/agent_test_v3_aborted_runaway.jsonl` 에 남겼다.
 
 | 버전 | 표본 | 정상 경보 걸러냄 | 어뷰저 유지 | 유형 정확도 (기준선) | 근거 수치 사실성 | 건당 |
 |---|---|---:|---:|---:|---:|---:|
