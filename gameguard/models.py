@@ -55,7 +55,7 @@ def _best_threshold(oof: np.ndarray, y: np.ndarray, rule_flag: np.ndarray):
 
 def train(db: str, hits_path: str, mode: str) -> dict:
     feat = build_features(db)
-    lab = load_labels(connect(db, read_only=True)).set_index("account_id").loc[feat["account_id"]]
+    lab = load_labels(db).set_index("account_id").loc[feat["account_id"]]
     X = _xy(feat)
     rule_flag = feat["account_id"].isin(set(pd.read_parquet(hits_path)["account_id"])).to_numpy()
     y = (lab["label"] != "normal").to_numpy()

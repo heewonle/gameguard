@@ -4,17 +4,21 @@
 """
 import argparse
 import datetime as dt
+import json
 import os
+import re
 
 import pandas as pd
 
-from .db import connect
+from .db import attach_labels, connect
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ABUSE = ["farm_bot", "rmt_ring", "macro", "multi_account", "market_manip", "chargeback"]
 
 
-def load_labels(con) -> pd.DataFrame:
+def load_labels(db: str) -> pd.DataFrame:
+    con = connect(db, read_only=True)
+    attach_labels(con, db)
     return con.execute("SELECT account_id, label, role, stealth FROM labels.account_labels").df()
 
 
@@ -65,7 +69,7 @@ def fmt(df: pd.DataFrame) -> str:
 
 def report_rules(db: str, hits_path: str, out_md: str) -> str:
     con = connect(db, read_only=True)
-    lab = load_labels(con)
+    lab = load_labels(db)
     hits = pd.read_parquet(hits_path)
     flagged = set(hits["account_id"])
     s = summary(flagged, lab)
@@ -93,7 +97,7 @@ def _queue_table(scores: pd.Series, rule_flag: pd.Series, lab: pd.DataFrame, k: 
 
 def report_stage2(db: str, out_dir: str, out_md: str, budget: int = 300) -> str:
     con = connect(db, read_only=True)
-    lab = load_labels(con)
+    lab = load_labels(db)
     ids = lab["account_id"]
     rules = set(pd.read_parquet(os.path.join(out_dir, "rule_hits.parquet"))["account_id"])
     sc = {m: pd.read_parquet(os.path.join(out_dir, f"ml_scores_{m}.parquet")).set_index("account_id")
@@ -140,7 +144,7 @@ def report_stage2(db: str, out_dir: str, out_md: str, budget: int = 300) -> str:
 
 def report_stage3(db: str, out_dir: str, out_md: str) -> str:
     con = connect(db, read_only=True)
-    lab = load_labels(con)
+    lab = load_labels(db)
     rules = set(pd.read_parquet(os.path.join(out_dir, "rule_hits.parquet"))["account_id"])
     ml = pd.read_parquet(os.path.join(out_dir, "ml_scores_sanctioned.parquet"))
     ml = set(ml.loc[ml["ml_flag"], "account_id"])
@@ -170,9 +174,99 @@ def report_stage3(db: str, out_dir: str, out_md: str) -> str:
     return text
 
 
+# ── 4단: LLM 조사 에이전트 ─────────────────────────────────────
+NUM = re.compile(r"-?\d[\d,]*\.?\d*")
+# LLM 없이 경보 근거만으로 유형을 붙이는 기준선 (우선순위 순)
+BASELINE_TYPE = [("R07", "chargeback"), ("R06", "market_manip"), ("R09", "market_manip"), ("R02", "macro"),
+                 ("R01", "farm_bot"), ("R08", "rmt_ring"), ("R05", "rmt_ring"), ("fanin", "multi_account"),
+                 ("R04", "multi_account"), ("R03", "farm_bot"), ("propagation", "rmt_ring")]
+
+
+def _nums(text: str):
+    out = []
+    for m in NUM.findall(str(text)):
+        try:
+            out.append(float(m.replace(",", "")))
+        except ValueError:
+            pass
+    return out
+
+
+def grounded(value: str, sources: str) -> bool:
+    """근거 값의 숫자가 모두 도구 결과(또는 경보 원문)에 있는가. 반올림 차이는 0.5% 까지 허용."""
+    want = _nums(value)
+    if not want:
+        return True
+    have = _nums(sources)
+    for w in want:
+        if not any(abs(w - h) <= max(abs(h) * 0.005, 0.0051) for h in have):
+            return False
+    return True
+
+
+def baseline_type(details: str) -> str:
+    for key, t in BASELINE_TYPE:
+        if key in details:
+            return t
+    return "unknown"
+
+
+def report_agent(db: str, out_dir: str, tag: str, out_md: str) -> str:
+    lab = load_labels(db).set_index("account_id")
+    alerts = pd.read_parquet(os.path.join(out_dir, "alerts.parquet")).set_index("account_id")
+    rs = [json.loads(l) for l in open(os.path.join(out_dir, f"agent_{tag}.jsonl"), encoding="utf-8")]
+    df = pd.DataFrame(rs)
+    df["truth"] = df["account_id"].map(lab["label"])
+    df["stealth"] = df["account_id"].map(lab["stealth"])
+    df["is_abuse"] = df["truth"] != "normal"
+    df["base_type"] = df["account_id"].map(lambda a: baseline_type(alerts.loc[a, "details"]))
+
+    # 근거 사실성
+    g_items, g_ok = 0, 0
+    for r in rs:
+        src = " ".join(t["result"] for t in r["transcript"]) + " " + r.get("brief", alerts.loc[r["account_id"], "details"])
+        for e in r.get("evidence", []):
+            g_items += 1
+            g_ok += grounded(e.get("value", ""), src)
+
+    conf = pd.crosstab(df["truth"].where(df["is_abuse"], "normal").map(lambda x: "어뷰징" if x != "normal" else "정상"),
+                       df["verdict"]).reindex(columns=["abuse", "uncertain", "normal"], fill_value=0)
+    ab, nm = df[df["is_abuse"]], df[~df["is_abuse"]]
+    kept = (ab["verdict"] != "normal").mean() if len(ab) else float("nan")
+    dismissed = (nm["verdict"] == "normal").mean() if len(nm) else float("nan")
+    tp_typed = ab[ab["verdict"] == "abuse"]
+    type_acc = (tp_typed["abuse_type"] == tp_typed["truth"]).mean() if len(tp_typed) else float("nan")
+    base_acc = (ab["base_type"] == ab["truth"]).mean() if len(ab) else float("nan")
+    by_type = ab.groupby("truth").apply(lambda g: pd.Series({
+        "n": len(g), "어뷰징 유지": (g["verdict"] != "normal").mean(),
+        "유형 정확(에이전트)": ((g["verdict"] == "abuse") & (g["abuse_type"] == g.name)).mean(),
+        "유형 정확(기준선)": (g["base_type"] == g.name).mean()}), include_groups=False).reset_index()
+
+    md = [f"# 4단 평가 — LLM 조사 에이전트 `{tag}` ({dt.date.today()})", "",
+          f"- 평가 월드 `{db}` 경보 {len(alerts):,}건 중 표본 {len(df)}건 (룰 포함 경보 / 룰 밖 경보를 출처로만 층화 추출, 라벨 미사용)",
+          f"- 모델 `{df['model'].iloc[0]}` (로컬 Ollama, 비용 0원) · 프롬프트 `{df['prompt'].iloc[0]}` — 개발 월드에서만 다듬고 고정",
+          f"- 표본 구성: 실제 어뷰저 {int(df['is_abuse'].sum())} / 정상(1~3단 오탐) {int((~df['is_abuse']).sum())}", "",
+          "## 판정", "",
+          f"- 정상인데 경보가 뜬 계정 중 에이전트가 **정상으로 걸러낸 비율 {dismissed:.1%}** (검토자 부담 감소)",
+          f"- 실제 어뷰저 중 **어뷰징/불확실로 유지한 비율 {kept:.1%}** (정상으로 잘못 넘기면 놓침)",
+          f"- 어뷰징으로 판정한 실제 어뷰저의 **유형 정확도 {type_acc:.1%}** (LLM 없이 경보 근거로 붙인 기준선 {base_acc:.1%})",
+          f"- 근거 수치 사실성: 근거 {g_items}개 중 숫자가 도구 결과와 일치 **{g_ok / max(g_items, 1):.1%}**", "",
+          "| 실제 \\ 판정 | abuse | uncertain | normal |", "|---|---:|---:|---:|",
+          *[f"| {i} | " + " | ".join(str(int(v)) for v in row) + " |" for i, row in conf.iterrows()], "",
+          "## 유형별", "", fmt(by_type), "",
+          "## 비용·속도 (RTX 4070 SUPER 로컬)", "",
+          f"- 건당 중앙값 {df['seconds'].median():.1f}초, 도구 호출 {df['tool_calls'].median():.0f}회, "
+          f"입력 토큰 {df['tokens_in'].median():,.0f} / 출력 {df['tokens_out'].median():,.0f}",
+          f"- 전체 {df['seconds'].sum() / 60:.0f}분, API 비용 0원", ""]
+    text = "\n".join(md)
+    open(out_md, "w", encoding="utf-8").write(text)
+    return text
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("what", choices=["rules", "stage2", "stage3"])
+    ap.add_argument("what", choices=["rules", "stage2", "stage3", "agent"])
+    ap.add_argument("--tag")
     ap.add_argument("--db", default="data/test.duckdb")
     ap.add_argument("--hits", default="data/out_test/rule_hits.parquet")
     ap.add_argument("--out", default="data/out_test")
@@ -182,5 +276,7 @@ if __name__ == "__main__":
         print(report_rules(a.db, a.hits, a.md or os.path.join(ROOT, "reports", "eval_rules_test.md")))
     elif a.what == "stage2":
         print(report_stage2(a.db, a.out, a.md or os.path.join(ROOT, "reports", "eval_stage2_test.md")))
-    else:
+    elif a.what == "stage3":
         print(report_stage3(a.db, a.out, a.md or os.path.join(ROOT, "reports", "eval_stage3_test.md")))
+    else:
+        print(report_agent(a.db, a.out, a.tag, a.md or os.path.join(ROOT, "reports", f"eval_agent_{a.tag}.md")))

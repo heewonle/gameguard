@@ -1,7 +1,8 @@
 """DuckDB 적재와 연결.
 
-공개 테이블은 main 스키마, 정답은 labels 스키마에 둔다.
-탐지 코드(sql/rules, sql/features)는 labels 스키마를 절대 참조하지 않는다 — tests/test_no_label_leak.py 가 검사.
+공개 테이블은 <db>.duckdb, 정답은 별도 파일 <db>_labels.duckdb 에 둔다.
+탐지 DB 파일에는 정답이 물리적으로 없다 — 탐지 코드·LLM 에이전트가 어떤 SQL 을 써도 정답을 읽을 수 없다.
+채점(evaluate.py)만 attach_labels() 로 정답 파일을 붙여 labels 스키마로 읽는다.
 
   python -m gameguard.db load --raw data/raw --db data/gameguard.duckdb
 """
@@ -27,14 +28,27 @@ def load(raw: str, db_path: str) -> None:
     con = connect(db_path)
     for t in PUBLIC:
         con.execute(f"CREATE TABLE {t} AS SELECT * FROM read_parquet(?)", [os.path.join(raw, f"{t}.parquet")])
-    con.execute("CREATE SCHEMA labels")
+    lpath = labels_path(db_path)
+    if os.path.exists(lpath):
+        os.remove(lpath)
+    lcon = connect(lpath)
     for t in LABELS:
-        con.execute(f"CREATE TABLE labels.{t} AS SELECT * FROM read_parquet(?)",
-                    [os.path.join(raw, "labels", f"{t}.parquet")])
+        lcon.execute(f"CREATE TABLE {t} AS SELECT * FROM read_parquet(?)",
+                     [os.path.join(raw, "labels", f"{t}.parquet")])
+    lcon.close()
     for t in PUBLIC:
         n = con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
         print(f"{t:16s} {n:>12,}")
     con.close()
+
+
+def labels_path(db_path: str) -> str:
+    return os.path.splitext(db_path)[0] + "_labels.duckdb"
+
+
+def attach_labels(con, db_path: str) -> None:
+    """채점 전용: 정답 파일을 labels 스키마로 붙인다."""
+    con.execute(f"ATTACH '{labels_path(db_path)}' AS labels (READ_ONLY)")
 
 
 def run_sql_file(con, path: str, **params):
