@@ -161,6 +161,16 @@ def report_stage3(db: str, out_dir: str, out_md: str) -> str:
         st_rows.append(stealth_table(flagged, lab).set_index("label")["recall_stealth"].rename(name))
     st = pd.concat(st_rows, axis=1).reset_index().rename(columns={"label": "유형 (은닉형 재현율)"})
     final = rules | ml | fi | pr
+    # 오탐 출처: 최종 경보 중 정상 계정이 어느 단계 조합에서 나왔고, 어떤 정상 유형인가
+    src = pd.DataFrame({"account_id": sorted(final)})
+    src["출처"] = src["account_id"].map(lambda a: " + ".join(
+        n for n, s in (("룰", rules), ("ML", ml), ("송금집중", fi), ("전파", pr)) if a in s))
+    src = src.merge(lab, on="account_id")
+    fp = src[src["label"] == "normal"]
+    fp_tab = fp.pivot_table(index="출처", columns="role", values="account_id", aggfunc="count", fill_value=0)
+    fp_tab["합계"] = fp_tab.sum(axis=1)
+    fp_tab = fp_tab.sort_values("합계", ascending=False).reset_index()
+    md_fp = ["## 최종 오탐 출처 (정상 계정이 어느 단계에서 걸렸나)", "", fmt(fp_tab), ""]
     md = [f"# 3단 평가 — 룰 + ML + 그래프 ({dt.date.today()})", "",
           f"- 평가 월드: `{db}` — 계정 {len(lab):,}, 어뷰징 {int((lab['label'] != 'normal').sum()):,}",
           "- 모든 임계값은 개발 월드(seed 42)에서 결정. ML은 룰로 확정된 계정만 양성으로 학습(sanctioned).",
@@ -168,7 +178,7 @@ def report_stage3(db: str, out_dir: str, out_md: str) -> str:
           "- 경보 전파: 룰 히트(확정에 가까운 경보)를 씨앗으로, 거래·신원 연결 가중치의 70% 이상이 씨앗 쪽인 계정. ML 경보는 검토 전이므로 씨앗에서 뺀다", "",
           "## 단계별 누적 성능", "", fmt(pd.DataFrame(rows)), "",
           "## 단계별 은닉형 재현율", "", fmt(st), "",
-          "## 최종 유형·역할별 재현율", "", fmt(coverage_table(final, lab)), ""]
+          "## 최종 유형·역할별 재현율", "", fmt(coverage_table(final, lab)), "", *md_fp]
     text = "\n".join(md)
     open(out_md, "w", encoding="utf-8").write(text)
     return text
@@ -221,13 +231,23 @@ def report_agent(db: str, out_dir: str, tag: str, out_md: str) -> str:
     df["is_abuse"] = df["truth"] != "normal"
     df["base_type"] = df["account_id"].map(lambda a: baseline_type(alerts.loc[a, "details"]))
 
-    # 근거 사실성
-    g_items, g_ok = 0, 0
+    # 근거 사실성. 근거 값이 기준 문구("≥ 3")나 숫자 없는 말이면 사실성 검사를 쉽게 통과하므로 따로 센다
+    crit = re.compile(r"[≥≤<>]|이상|이하|미만|초과")
+    g_items, g_ok, n_crit, n_nonum, m_items, m_ok = 0, 0, 0, 0, 0, 0
     for r in rs:
         src = " ".join(t["result"] for t in r["transcript"]) + " " + r.get("brief", alerts.loc[r["account_id"], "details"])
         for e in r.get("evidence", []):
+            v = e.get("value", "")
+            ok = grounded(v, src)
             g_items += 1
-            g_ok += grounded(e.get("value", ""), src)
+            g_ok += ok
+            if crit.search(v):
+                n_crit += 1
+            elif not re.search(r"\d", v):
+                n_nonum += 1
+            else:
+                m_items += 1
+                m_ok += ok
 
     conf = pd.crosstab(df["truth"].where(df["is_abuse"], "normal").map(lambda x: "어뷰징" if x != "normal" else "정상"),
                        df["verdict"]).reindex(columns=["abuse", "uncertain", "normal"], fill_value=0)
@@ -250,7 +270,9 @@ def report_agent(db: str, out_dir: str, tag: str, out_md: str) -> str:
           f"- 정상인데 경보가 뜬 계정 중 에이전트가 **정상으로 걸러낸 비율 {dismissed:.1%}** (검토자 부담 감소)",
           f"- 실제 어뷰저 중 **어뷰징/불확실로 유지한 비율 {kept:.1%}** (정상으로 잘못 넘기면 놓침)",
           f"- 어뷰징으로 판정한 실제 어뷰저의 **유형 정확도 {type_acc:.1%}** (LLM 없이 경보 근거로 붙인 기준선 {base_acc:.1%})",
-          f"- 근거 수치 사실성: 근거 {g_items}개 중 숫자가 도구 결과와 일치 **{g_ok / max(g_items, 1):.1%}**", "",
+          f"- 근거 수치 사실성: 근거 {g_items}개 중 숫자가 도구 결과와 일치 **{g_ok / max(g_items, 1):.1%}**",
+          f"  - 엄격 기준: 측정값을 인용한 근거 {m_items}개({m_items / max(g_items, 1):.1%}) 중 일치 **{m_ok / max(m_items, 1):.1%}**. "
+          f"나머지는 기준 문구를 옮긴 근거 {n_crit}개, 숫자 없는 근거 {n_nonum}개", "",
           "| 실제 \\ 판정 | abuse | uncertain | normal |", "|---|---:|---:|---:|",
           *[f"| {i} | " + " | ".join(str(int(v)) for v in row) + " |" for i, row in conf.iterrows()], "",
           f"- 판정 JSON 이 길이 상한(2,048 토큰)에 잘려 uncertain 처리된 건 {int(df.get('_raw', pd.Series(dtype=object)).notna().sum())}건",

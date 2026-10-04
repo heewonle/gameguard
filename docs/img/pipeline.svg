@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="Malgun Gothic, Noto Sans KR, sans-serif">
+  <title>GameGuard 탐지·조사 파이프라인</title>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#52514e"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="960" height="300" fill="#fcfcfb"/>
+
+  <!-- 데이터 -->
+  <rect x="16" y="96" width="132" height="92" rx="10" fill="#ffffff" stroke="#8a8984" stroke-width="1.5"/>
+  <text x="82" y="124" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">게임 로그</text>
+  <text x="82" y="146" text-anchor="middle" font-size="12" fill="#52514e">행동 2,347만 행</text>
+  <text x="82" y="164" text-anchor="middle" font-size="12" fill="#52514e">거래·골드·결제·세션</text>
+
+  <!-- 1단 -->
+  <rect x="186" y="40" width="160" height="70" rx="10" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+  <text x="266" y="68" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">1단 SQL 룰 9개</text>
+  <text x="266" y="90" text-anchor="middle" font-size="12" fill="#0b0b0b">정밀도 0.997</text>
+
+  <!-- 2단 -->
+  <rect x="186" y="124" width="160" height="70" rx="10" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+  <text x="266" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">2단 피처 52개 + ML</text>
+  <text x="266" y="172" text-anchor="middle" font-size="12" fill="#0b0b0b">룰 밖 검토 예산 300</text>
+
+  <!-- 3단 -->
+  <rect x="186" y="208" width="160" height="70" rx="10" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+  <text x="266" y="234" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">3단 거래·신원 그래프</text>
+  <text x="266" y="256" text-anchor="middle" font-size="12" fill="#0b0b0b">송금 집중 · 경보 전파</text>
+
+  <line x1="148" y1="130" x2="184" y2="78" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="148" y1="142" x2="184" y2="158" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="148" y1="154" x2="184" y2="236" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <!-- 룰 히트 → 그래프 씨앗 -->
+  <path d="M346,96 C372,120 372,200 348,226" fill="none" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+  <text x="378" y="168" font-size="11" fill="#52514e">씨앗</text>
+
+  <!-- 경보 -->
+  <rect x="420" y="112" width="118" height="76" rx="10" fill="#ffffff" stroke="#8a8984" stroke-width="1.5"/>
+  <text x="479" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">경보 1,245</text>
+  <text x="479" y="164" text-anchor="middle" font-size="12" fill="#52514e">F1 0.928</text>
+  <line x1="346" y1="75" x2="418" y2="134" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="346" y1="159" x2="418" y2="152" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <line x1="346" y1="243" x2="418" y2="170" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- 4단 에이전트 -->
+  <rect x="576" y="104" width="170" height="92" rx="10" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+  <text x="661" y="132" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">4단 LLM 조사 에이전트</text>
+  <text x="661" y="154" text-anchor="middle" font-size="12" fill="#0b0b0b">읽기 전용 도구 6개</text>
+  <text x="661" y="172" text-anchor="middle" font-size="12" fill="#0b0b0b">로컬 8B · 건당 21초</text>
+  <line x1="538" y1="150" x2="574" y2="150" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- 사람 검토 -->
+  <rect x="786" y="104" width="158" height="92" rx="10" fill="#ffffff" stroke="#0b0b0b" stroke-width="2"/>
+  <text x="865" y="134" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0b">사람 검토</text>
+  <text x="865" y="156" text-anchor="middle" font-size="12" fill="#52514e">제재 확정 / 모니터링</text>
+  <text x="865" y="174" text-anchor="middle" font-size="12" fill="#52514e">/ 오탐</text>
+  <line x1="746" y1="150" x2="784" y2="150" stroke="#52514e" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- 재학습 루프 -->
+  <path d="M865,196 C865,286 560,290 348,176" fill="none" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+  <text x="610" y="276" text-anchor="middle" font-size="11" fill="#52514e">확정 제재 = 다음 ML 학습 라벨</text>
+</svg>

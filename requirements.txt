@@ -11,3 +11,4 @@ tabulate>=0.9
 joblib>=1.4
 ollama>=0.5
 streamlit>=1.40
+markdown>=3.5
