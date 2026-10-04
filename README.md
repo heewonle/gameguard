@@ -58,6 +58,22 @@
 
 상세: [reports/eval_agent_test_v3.md](reports/eval_agent_test_v3.md)
 
+## 운영 — 일일 배치와 검토 대시보드
+
+**일일 배치** (`python -m gameguard.run`): 품질 체크 → 룰 → ML → 그래프 → 경보 → 조사 에이전트 → 실행 기록.
+- 단계마다 로그·JSON 기록(`data/out_*/runs/`), 실패해도 멈추지 않고 그 결과에 기대는 뒤 단계만 건너뛴다
+- 에이전트는 **아직 조사하지 않은 경보만** 우선순위(걸린 단계 수 → 룰 밖 경보 → ML 점수) 순으로 예산만큼 조사 → 매일 돌려도 중복 없음
+- 탐지 1~3단은 평가 월드 2,347만 행 기준 약 4초, 에이전트는 건당 약 20초
+- Windows 작업 스케줄러 등록: `scripts/register_task.ps1` (직접 실행할 때만 등록)
+
+**검토 대시보드** (`streamlit run app/streamlit_app.py`): 정답을 읽지 않는 운영 화면.
+- 경보 큐: 에이전트 판정(어뷰징 → 불확실 → 미조사 → 정상)·걸린 단계·ML 백분위 순 정렬, 필터
+- 계정 조사: 에이전트 보고서(근거 표·도구 호출 기록), 일별 접속 시간, 거래·신원 연결 그래프, 거래 상대
+- 사람 검토 기록: 제재 확정 / 모니터링 / 오탐 → `reviews.jsonl` (확정 제재는 다음 ML 재학습의 양성 라벨)
+- 배치 실행 기록, 평가 보고서
+
+![계정 조사 화면 — 일별 접속 시간과 거래·신원 연결](docs/img/dashboard_account_graph.jpg)
+
 ## 데이터
 
 `sim/` 이 30일치 월드를 만든다 (기본 설정 기준).
@@ -110,6 +126,8 @@ python -m gameguard.alerts --out data/out_test                       # 최종 �
 ollama pull qwen3-vl:8b-instruct                                     # 로컬 LLM (최초 1회)
 python -m gameguard.agent.agent --db data/test.duckdb --out data/out_test --n-rule 50 --n-other 100 --prompt v3 --tag test_v3
 python -m gameguard.evaluate agent --tag test_v3
+python -m gameguard.run --db data/test.duckdb --out data/out_test --agent-budget 20   # 일일 배치 (위 단계를 한 번에)
+streamlit run app/streamlit_app.py -- --db data/test.duckdb --out data/out_test    # 검토 대시보드
 python -m pytest
 ```
 
@@ -120,5 +138,5 @@ python -m pytest
 - [x] 계정 피처 SQL(52개) + IsolationForest / LightGBM (oracle·sanctioned 라벨 비교)
 - [x] 거래·신원 그래프 (신원 그룹 송금 집중 + 룰 히트 기반 경보 전파)
 - [x] LLM 조사 에이전트 (로컬 Ollama) + 평가
-- [ ] Streamlit 대시보드, 일일 배치
+- [x] Streamlit 검토 대시보드, 일일 배치 (실패 격리·중복 없는 에이전트 조사)
 - [ ] 방법론 문서
