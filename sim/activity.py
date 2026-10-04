@@ -9,6 +9,7 @@ P_ACT = {
     "human": [0.45, 0.20, 0.15, 0.10, 0.05, 0.05],
     "bot":   [0.60, 0.35, 0.05, 0.00, 0.00, 0.00],
     "macro": [0.55, 0.40, 0.05, 0.00, 0.00, 0.00],
+    "stealth": [0.50, 0.27, 0.12, 0.07, 0.01, 0.03],   # 이동·채팅을 조금 섞은 은닉형 봇/부계정
 }
 PCBANG_IPS = 200
 
@@ -117,15 +118,25 @@ def make_actions(s: pd.DataFrame, acc: pd.DataFrame, cfg: dict, rng) -> pd.DataF
     sess_i, offset = sess_i[keep], offset[keep]
     M = len(sess_i)
 
-    # 행동 유형
-    style = np.where(kind[sess_i] == "farm_bot", 1, 0)
-    style = np.where(macro[sess_i], 2, style)
-    single = acc["single_map"].to_numpy()[a][sess_i] | macro[sess_i]
-    style = np.where((style == 0) & single, 1, style)   # 부계정 자동사냥도 봇형 분포
-    act = np.empty(M, dtype=object)
-    for k, name in enumerate(["human", "bot", "macro"]):
-        m = style == k
-        act[m] = rng.choice(ACTIONS, m.sum(), p=P_ACT[name])
+    # 행동 유형: 계정마다 기본 분포를 디리클레로 흔들어 개인차를 둔다
+    stealth = acc["stealth"].to_numpy()
+    single_acc = acc["single_map"].to_numpy()
+    kind_acc = acc["kind"].to_numpy()
+    botlike = (kind_acc == "farm_bot") | single_acc
+    base = np.array([P_ACT["human"]] * len(acc))
+    base[botlike & ~stealth] = P_ACT["bot"]
+    base[botlike & stealth] = P_ACT["stealth"]
+    p_acc = np.vstack([rng.dirichlet(np.array(b) * 60 + 1e-3) for b in base])
+    p_sess = p_acc[a]
+    p_sess[macro] = P_ACT["macro"]
+    cum_sess = np.cumsum(p_sess, axis=1)
+    idx = np.empty(M, dtype=np.int8)
+    for lo in range(0, M, 2_000_000):                    # 메모리 절약: 200만 행씩
+        hi = min(lo + 2_000_000, M)
+        u = rng.random(hi - lo)[:, None]
+        idx[lo:hi] = np.minimum((u > cum_sess[sess_i[lo:hi]]).sum(1), len(ACTIONS) - 1)
+    act = ACTIONS[idx]
+    single = single_acc[a][sess_i] | macro[sess_i]
 
     # 사냥터: 세션 주 사냥터 ± 1, 사람은 행동의 25%가 인접 맵
     n_maps = cfg["world"]["n_maps"]
@@ -142,11 +153,17 @@ def make_actions(s: pd.DataFrame, acc: pd.DataFrame, cfg: dict, rng) -> pd.DataF
     skill = ((skill_base + rng.integers(0, 1 << 30, M) % nsk) % 30 + 1).astype("int16")
     skill[~np.isin(act, ["kill", "skill"])] = 0
 
-    # 좌표: 사람은 맵 전체, 봇/매크로는 반경 30 안을 맴돔
-    cx = (acc["account_id"].to_numpy()[a] * 37 % 900 + 50)[sess_i]
-    cy = (acc["account_id"].to_numpy()[a] * 91 % 900 + 50)[sess_i]
-    x = np.where(single, cx + rng.normal(0, 15, M), rng.uniform(0, 1000, M)).astype("float32")
-    y = np.where(single, cy + rng.normal(0, 15, M), rng.uniform(0, 1000, M)).astype("float32")
+    # 좌표: 세션마다 사냥 거점을 정하고 그 주변에 분포. 퍼짐(표준편차)은 사람 60~200,
+    # 일반 봇·매크로 15, 은닉형 봇·부계정 50~120, 은닉형 매크로 40
+    sd_acc = rng.uniform(60, 200, len(acc))
+    sd_acc[botlike & ~stealth] = 15
+    sd_acc[botlike & stealth] = rng.uniform(50, 120, (botlike & stealth).sum())
+    sd_sess = sd_acc[a].copy()
+    sd_sess[macro] = np.where(stealth[a][macro], 40, 15)
+    cx = rng.uniform(100, 900, len(s))[sess_i]
+    cy = rng.uniform(100, 900, len(s))[sess_i]
+    x = np.clip(cx + rng.normal(0, 1, M) * sd_sess[sess_i], 0, 1000).astype("float32")
+    y = np.clip(cy + rng.normal(0, 1, M) * sd_sess[sess_i], 0, 1000).astype("float32")
 
     ts = s["login_at"].to_numpy()[sess_i] + (offset * 1000).astype("timedelta64[ms]")
     return pd.DataFrame({

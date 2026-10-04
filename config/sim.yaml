@@ -11,6 +11,7 @@ normal:
   guild_size: 25             # 길드장은 길드원 선물을 받음 (RMT 수거 오탐 유도)
   payer_frac: 0.10
   legit_refund_rate: 0.01    # 정상 환불 (차지백 오탐 유도)
+  new_player_frac: 0.10      # 기간 중 가입한 정상 신규 유저
   action_interval_s: 120     # 로그로 남는 의미 있는 행동(사냥·루팅·스킬 등) 평균 간격
 
 abuse:

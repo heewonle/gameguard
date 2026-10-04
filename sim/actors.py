@@ -140,7 +140,9 @@ def make_accounts(cfg: dict, rng: np.random.Generator, start: pd.Timestamp) -> p
     created = start - pd.to_timedelta(rng.integers(1, 900, N), unit="D")
     new_mask = acc["role"].isin(["alt", "payer", "receiver"]).to_numpy()
     new_mask = new_mask | acc["role"].eq("buyer").to_numpy() & (rng.random(N) < 0.3)
-    offs = rng.uniform(0, days * 0.6, N)
+    # 기간 중 새로 들어온 정상 유저 (신규 계정 = 어뷰저라는 지름길을 막는다)
+    new_mask = new_mask | acc["kind"].eq("normal").to_numpy() & (rng.random(N) < cfg["normal"].get("new_player_frac", 0.0))
+    offs = rng.uniform(0, days * 0.8, N)
     created = np.where(new_mask, start + pd.to_timedelta(offs, unit="D"), created)
     acc["created_at"] = pd.to_datetime(created).floor("s")
 

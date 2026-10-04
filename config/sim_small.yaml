@@ -10,6 +10,7 @@ normal:
   guild_size: 25
   payer_frac: 0.10
   legit_refund_rate: 0.01
+  new_player_frac: 0.10
   action_interval_s: 120
 
 abuse:
